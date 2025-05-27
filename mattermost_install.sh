@@ -31,9 +31,9 @@ check_requirements() {
     log "Verificando requisitos do sistema..."
     
     # Verificar se é Ubuntu 24.04
-    if ! grep -q "Ubuntu 24.04" /etc/os-release; then
-        error "Este script é específico para Ubuntu 24.04 LTS"
-    fi
+    #if ! grep -q "Ubuntu 24.04" /etc/os-release; then
+    #    error "Este script é específico para Ubuntu 24.04 LTS"
+    #fi
     
     # Verificar se é executado como root
     if [[ $EUID -ne 0 ]]; then
