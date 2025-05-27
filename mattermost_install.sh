@@ -105,9 +105,14 @@ setup_postgresql() {
         error "Arquivo pg_hba.conf não encontrado: $PG_HBA"
     fi
     
-    # Backup das configurações originais
-    cp $PG_CONFIG $PG_CONFIG.backup
-    cp $PG_HBA $PG_HBA.backup
+    # Backup das configurações originais (se ainda não existir)
+    if [ ! -f "$PG_CONFIG.backup" ]; then
+        cp $PG_CONFIG $PG_CONFIG.backup
+    fi
+    
+    if [ ! -f "$PG_HBA.backup" ]; then
+        cp $PG_HBA $PG_HBA.backup
+    fi
     
     # Configurar postgresql.conf
     sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" $PG_CONFIG
@@ -122,15 +127,24 @@ setup_postgresql() {
     # Aguardar PostgreSQL inicializar
     sleep 3
     
-    # Criar usuário do banco de dados
-    log "Criando usuário do banco de dados..."
-    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+    # Verificar se usuário já existe
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+        log "Usuário $DB_USER já existe. Atualizando senha..."
+        sudo -u postgres psql -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+    else
+        log "Criando usuário do banco de dados..."
+        sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+    fi
     
-    # Criar banco de dados
-    log "Criando banco de dados..."
-    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+    # Verificar se banco já existe
+    if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw $DB_NAME; then
+        log "Banco de dados $DB_NAME já existe."
+    else
+        log "Criando banco de dados..."
+        sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+    fi
     
-    # Conceder privilégios
+    # Conceder privilégios (sempre executar para garantir)
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
     
     # Testar conexão
@@ -172,9 +186,15 @@ install_mattermost() {
     # Atualizar lista de pacotes
     apt update
     
-    # Instalar Mattermost (última versão disponível)
-    log "Instalando Mattermost via APT..."
-    apt install -y mattermost
+    # Verificar se Mattermost já está instalado
+    if dpkg -l | grep -q mattermost; then
+        log "Mattermost já está instalado. Verificando atualização..."
+        apt upgrade -y mattermost
+    else
+        # Instalar Mattermost (última versão disponível)
+        log "Instalando Mattermost via APT..."
+        apt install -y mattermost
+    fi
     
     # O APT instala em /opt/mattermost por padrão
     MATTERMOST_HOME="/opt/mattermost"
@@ -185,7 +205,7 @@ install_mattermost() {
     # Verificar se a instalação foi bem-sucedida
     if [ -f "$MATTERMOST_HOME/bin/mattermost" ]; then
         log "Mattermost instalado com sucesso via repositório oficial!"
-        MATTERMOST_VERSION=$($MATTERMOST_HOME/bin/mattermost version | head -1 | awk '{print $2}')
+        MATTERMOST_VERSION=$($MATTERMOST_HOME/bin/mattermost version 2>/dev/null | head -1 | awk '{print $2}' || echo "versão não detectada")
         log "Versão instalada: $MATTERMOST_VERSION"
     else
         error "Falha na instalação do Mattermost"
