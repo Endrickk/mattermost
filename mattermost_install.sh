@@ -66,7 +66,7 @@ setup_variables() {
     DB_PASSWORD=$(openssl rand -base64 32)
     
     # Domínio local
-    LOCAL_DOMAIN="1ri.local"
+    LOCAL_DOMAIN="chat.1ri.local"
     
     log "Variáveis configuradas!"
 }
