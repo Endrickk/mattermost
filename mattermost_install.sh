@@ -66,7 +66,7 @@ setup_variables() {
     DB_PASSWORD=$(openssl rand -base64 32)
     
     # Domínio local
-    LOCAL_DOMAIN="chat.1ri.local"
+    LOCAL_DOMAIN="1ri.local"
     
     log "Variáveis configuradas!"
 }
@@ -88,18 +88,22 @@ setup_postgresql() {
     systemctl start postgresql
     systemctl enable postgresql
     
-    # Criar usuário e banco de dados
-    sudo -u postgres createuser --pwprompt $DB_USER <<EOF
-$DB_PASSWORD
-$DB_PASSWORD
-EOF
+    # Detectar versão do PostgreSQL instalada
+    PG_VERSION=$(sudo -u postgres psql -t -c "SHOW server_version;" | grep -oE '[0-9]+' | head -1)
+    log "Versão do PostgreSQL detectada: $PG_VERSION"
     
-    sudo -u postgres createdb -O $DB_USER $DB_NAME
-    
-    # Configurar PostgreSQL
-    PG_VERSION=$(sudo -u postgres psql -t -c "SELECT version();" | grep -oP '\d+\.\d+' | head -1)
+    # Definir caminhos dos arquivos de configuração
     PG_CONFIG="/etc/postgresql/$PG_VERSION/main/postgresql.conf"
     PG_HBA="/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
+    
+    # Verificar se os arquivos existem
+    if [ ! -f "$PG_CONFIG" ]; then
+        error "Arquivo de configuração PostgreSQL não encontrado: $PG_CONFIG"
+    fi
+    
+    if [ ! -f "$PG_HBA" ]; then
+        error "Arquivo pg_hba.conf não encontrado: $PG_HBA"
+    fi
     
     # Backup das configurações originais
     cp $PG_CONFIG $PG_CONFIG.backup
@@ -112,10 +116,30 @@ EOF
     # Configurar pg_hba.conf para autenticação md5
     sed -i "s/local   all             all                                     peer/local   all             all                                     md5/" $PG_HBA
     
-    # Reiniciar PostgreSQL
+    # Reiniciar PostgreSQL para aplicar configurações
     systemctl restart postgresql
     
-    log "PostgreSQL configurado com sucesso!"
+    # Aguardar PostgreSQL inicializar
+    sleep 3
+    
+    # Criar usuário do banco de dados
+    log "Criando usuário do banco de dados..."
+    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+    
+    # Criar banco de dados
+    log "Criando banco de dados..."
+    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
+    
+    # Conceder privilégios
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
+    
+    # Testar conexão
+    log "Testando conexão com o banco..."
+    if PGPASSWORD=$DB_PASSWORD psql -h localhost -U $DB_USER -d $DB_NAME -c "SELECT 1;" > /dev/null 2>&1; then
+        log "PostgreSQL configurado com sucesso!"
+    else
+        error "Falha ao conectar com o banco de dados. Verifique as configurações."
+    fi
 }
 
 # Criar usuário do sistema
@@ -357,22 +381,21 @@ start_services() {
 
 # Informações finais
 show_final_info() {
-    SERVER_IP=$(curl -s http://checkip.amazonaws.com/ 2>/dev/null || echo "localhost")
-    
     echo
     echo "=========================================="
     echo -e "${GREEN}INSTALAÇÃO CONCLUÍDA COM SUCESSO!${NC}"
     echo "=========================================="
     echo
     echo "📋 INFORMAÇÕES DO SISTEMA:"
-    echo "• Mattermost versão: $MATTERMOST_VERSION"
+    echo "• Mattermost: Última versão estável (via repositório oficial)"
     echo "• Diretório: $MATTERMOST_HOME"
     echo "• Usuário do sistema: $MATTERMOST_USER"
     echo "• Banco de dados: PostgreSQL"
+    echo "• Domínio configurado: $LOCAL_DOMAIN"
     echo
     echo "🌐 ACESSO:"
-    echo "• URL: http://$SERVER_IP"
-    echo "• Porta administrativa: http://$SERVER_IP:8065"
+    echo "• URL principal: http://$LOCAL_DOMAIN"
+    echo "• Porta administrativa: http://$LOCAL_DOMAIN:8065"
     echo
     echo "🔐 CREDENCIAIS DO BANCO:"
     echo "• Usuário: $DB_USER"
@@ -380,14 +403,20 @@ show_final_info() {
     echo "• Banco: $DB_NAME"
     echo
     echo "📝 PRÓXIMOS PASSOS:"
-    echo "1. Acesse http://$SERVER_IP para criar o primeiro administrador"
-    echo "2. Configure SSL/TLS com: sudo certbot --nginx"
-    echo "3. Ajuste as configurações em: $MATTERMOST_HOME/config/config.json"
+    echo "1. Configure o DNS/hosts para apontar $LOCAL_DOMAIN para este servidor"
+    echo "2. Acesse http://$LOCAL_DOMAIN para criar o primeiro administrador"
+    echo "3. Para SSL local: sudo certbot --nginx -d $LOCAL_DOMAIN"
+    echo "4. Ajuste as configurações em: $MATTERMOST_HOME/config/config.json"
     echo
     echo "🔧 COMANDOS ÚTEIS:"
     echo "• Status: sudo systemctl status mattermost"
     echo "• Logs: sudo journalctl -u mattermost -f"
     echo "• Reiniciar: sudo systemctl restart mattermost"
+    echo "• Atualizar: sudo apt update && sudo apt upgrade mattermost"
+    echo
+    echo "🏠 CONFIGURAÇÃO DE HOSTS:"
+    echo "Para acessar via $LOCAL_DOMAIN, adicione no /etc/hosts dos clientes:"
+    echo "IP_DO_SERVIDOR    $LOCAL_DOMAIN"
     echo
     echo "⚠️  IMPORTANTE: Salve as credenciais do banco de dados!"
     echo
